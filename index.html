@@ -24,6 +24,114 @@
 	
 	  <div class="h-entry">
 		
+			<h1><a href="https://journal.mackuba.eu/2025/03/18/speeding-up-the-firehose/">Speeding up the firehose</a></h1>
+		
+
+		<a href="https://journal.mackuba.eu/2025/03/18/speeding-up-the-firehose/" class="u-url"><time class="dt-published" datetime="2025-03-18 18:26:20 &#43;0200">Mar 18, 2025</time></a>
+
+		<div class="e-content">
+			 <p>As the final phase of my <a href="/2025/01/16/postgress-progress/">database experiments</a>, I&rsquo;ve been playing recently with optimizing the speed of processing in the firehose process.</p>
+<p>The Bluesky firehose is a streaming API that sends you every single thing happening on the network in real time – every post, like, follow, everything (encoded in a binary format called <a href="https://cbor.io">CBOR</a>). And my firehose process is a client connecting to that stream, pulling data from it and saving the relevant parts (the posts).</p>
+<p>At the moment, the firehose flow ranges between ~300 and 700 events per second during the day (&ldquo;event&rdquo; being one &ldquo;action&rdquo; like created or deleted record of any kind), with the bottom around 7-9:00 UTC and the top around 17-22:00 UTC. But the highest bandwidth we&rsquo;ve seen so far was around <a href="https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:oio4hkxaop4ao4wz2pp3f4cr/bafkreickjkjffrmqcq7wdezei2tuytra2hjpnyiesfzc5rkxsobkzpufju@jpeg">1.8-2.0k events/s</a> in mid November, when a massive new wave of new users joined in the aftermath of the US elections, and we&rsquo;ve seen the traffic go up rapidly by a few hundred % within days before too, e.g. in early September when <a href="https://www.cnbc.com/2024/09/04/social-media-platform-bluesky-attracts-millions-in-brazil-after-judge-bans-musks-x-.html">the whole Brazil joined Bluesky</a>. The firehose protocol also includes a lot of extra data, needed for cryptographic verification and full replication of data repositories, but not used in a simple case like this – so the total data bandwidth to stream and process is an average ~20-30 Mbps right now (with the smaller traffic than before).</p>
+<p>My server was struggling back then in November, processing the 1.8k events per second, which is a big part of the reason why I started looking for a better suited database than SQLite, to be able to handle the next wave. I had a few improvements lined up, which I now started applying one by one (trying to do one at a time, so I can measure which one does what difference), each time pausing the reading for a day or so, and then catching up for several hours at full speed, so I can check what&rsquo;s the maximum speed it can do.</p>
+<p>I was also doing very simple profiling on the way, measuring which parts take how much time and where I can still save some extra microseconds:</p>
+<!-- raw HTML omitted -->
+<p>Overall, I managed to bring the number from around 2k evt/s to around 4k over a period of about a week (similarly in the MySQL and Postgres versions) – so not bad at all.</p>
+<!-- raw HTML omitted -->
+<p>These are the changes I&rsquo;ve made:</p>
+<hr>
+<h3 id="partial-indexes">Partial indexes</h3>
+<p>I&rsquo;ve switched two indexes in Postgres to <a href="https://www.postgresql.org/docs/current/indexes-partial.html">partial indexes</a> (MySQL doesn&rsquo;t support that). I have two indexes in the posts table, on <code>quote_id</code> and <code>thread_id</code>, which set a reference to a quoted post and the root of the thread respectively, which are NULL for some of the posts (<code>thread_id</code> for like half of the posts, <code>quote_id</code> for the vast majority), so I added a <code>WHERE ... IS NOT NULL</code> condition to those two.</p>
+<p><strong>Effect:</strong> no noticeable change in performance, but it least the indexes take less space now.</p>
+<hr>
+<h3 id="activerecord">ActiveRecord</h3>
+<p>I updated ActiveRecord – from v. 6.1 that I had before to 7.2 (Rails 8 was released in November, but it feels a bit too fresh right now). Ironically, AR 8.0 seems to finally <a href="https://github.com/rails/rails/pull/50371">fix my longstanding problem</a> with concurrency errors in SQLite, just when I&rsquo;m getting rid of it…</p>
+<p><strong>Effect:</strong> around +10% processing speed.</p>
+<hr>
+<h3 id="ruby-update--yjit">Ruby update + YJIT</h3>
+<p>I updated Ruby from 3.2 to 3.4 and enabled <a href="https://shopify.engineering/ruby-yjit-is-production-ready">YJIT</a>, a new optional JIT written in Rust. I had tested YJIT before on 3.2 and there was a noticeable improvement, but I&rsquo;ve noticed some kind of memory leak then that they&rsquo;ve apparently fixed only around <a href="https://bugs.ruby-lang.org/issues/20209">3.3.1</a>. Interestingly, my code seems to run slightly <em>slower</em> on 3.3 and 3.4 without YJIT, but enabling it more than makes up for it.</p>
+<p><strong>Effect:</strong> around +15%.</p>
+<hr>
+<h3 id="batch-inserts">Batch inserts</h3>
+<p>I was already previously grouping posts into a queue, waiting until I got 10, and then saving them all in one transaction, using code like this:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-rb" data-lang="rb"><span style="color:#66d9ef">ActiveRecord</span><span style="color:#f92672">::</span><span style="color:#66d9ef">Base</span><span style="color:#f92672">.</span>transaction <span style="color:#66d9ef">do</span>
+  @post_queue<span style="color:#f92672">.</span>each <span style="color:#66d9ef">do</span> <span style="color:#f92672">|</span>p<span style="color:#f92672">|</span>
+    p<span style="color:#f92672">.</span>save!
+  <span style="color:#66d9ef">end</span>
+<span style="color:#66d9ef">end</span>
+</code></pre></div><p>This was already faster than the initial way of saving of each post separately, directly in the block where it&rsquo;s built from the processed event. But that was still multiple INSERTs, and I wasn&rsquo;t sure I could do it in just one while using the ORM.</p>
+<p>Apparently I can, with the use of the <a href="https://dev.to/lorankloeze/creating-lots-of-records-in-rails-with-insertall-1bhe">insert_all API</a>. The catch is that it takes an array of raw argument hashes, skips validations and doesn&rsquo;t handle child records (my Post records have linked FeedPost entries if they are included in a feed). So I validate the records separately earlier (I was actually already validating them first before, which means the validations were running twice), and for those that have FeedPosts, I save them separately next.</p>
+<p>So the whole thing looks like this:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-rb" data-lang="rb"><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">process_post</span>(msg)
+  post <span style="color:#f92672">=</span> <span style="color:#66d9ef">Post</span><span style="color:#f92672">.</span>new(<span style="color:#f92672">...</span>)
+
+  <span style="color:#66d9ef">if</span> <span style="color:#f92672">!</span>post<span style="color:#f92672">.</span>valid?
+    log <span style="color:#e6db74">&#34;Error: post is invalid: ...&#34;</span>
+    <span style="color:#66d9ef">return</span>
+  <span style="color:#66d9ef">end</span>
+
+  @post_queue <span style="color:#f92672">&lt;&lt;</span> post
+
+  <span style="color:#66d9ef">if</span> @post_queue<span style="color:#f92672">.</span>length <span style="color:#f92672">&gt;=</span> <span style="color:#66d9ef">POSTS_BATCH_SIZE</span>
+    save_queued_posts
+  <span style="color:#66d9ef">end</span>
+<span style="color:#66d9ef">end</span>
+
+<span style="color:#66d9ef">def</span> <span style="color:#a6e22e">save_queued_posts</span>
+  matched, unmatched <span style="color:#f92672">=</span> @post_queue<span style="color:#f92672">.</span>partition { <span style="color:#f92672">|</span>x<span style="color:#f92672">|</span> <span style="color:#f92672">!</span>x<span style="color:#f92672">.</span>feed_posts<span style="color:#f92672">.</span>empty? }
+
+  <span style="color:#66d9ef">if</span> unmatched<span style="color:#f92672">.</span>length <span style="color:#f92672">&gt;</span> <span style="color:#ae81ff">0</span>
+    values <span style="color:#f92672">=</span> unmatched<span style="color:#f92672">.</span>map { <span style="color:#f92672">|</span>p<span style="color:#f92672">|</span> p<span style="color:#f92672">.</span>attributes<span style="color:#f92672">.</span>except(<span style="color:#e6db74">&#39;id&#39;</span>) }
+    <span style="color:#66d9ef">Post</span><span style="color:#f92672">.</span>insert_all(values)
+  <span style="color:#66d9ef">end</span>
+
+  @post_queue <span style="color:#f92672">=</span> matched
+  <span style="color:#66d9ef">return</span> <span style="color:#66d9ef">if</span> @post_queue<span style="color:#f92672">.</span>empty?
+
+  <span style="color:#66d9ef">ActiveRecord</span><span style="color:#f92672">::</span><span style="color:#66d9ef">Base</span><span style="color:#f92672">.</span>transaction <span style="color:#66d9ef">do</span>
+    @post_queue<span style="color:#f92672">.</span>each <span style="color:#66d9ef">do</span> <span style="color:#f92672">|</span>p<span style="color:#f92672">|</span>
+      p<span style="color:#f92672">.</span>save!(<span style="color:#e6db74">validate</span>: <span style="color:#66d9ef">false</span>)
+    <span style="color:#66d9ef">end</span>
+  <span style="color:#66d9ef">end</span>
+
+  @post_queue <span style="color:#f92672">=</span> <span style="color:#f92672">[]</span>
+<span style="color:#66d9ef">rescue</span> <span style="color:#66d9ef">StandardError</span> <span style="color:#f92672">=&gt;</span> e
+  <span style="color:#75715e"># ... try to save valid posts one by one</span>
+<span style="color:#66d9ef">end</span>
+</code></pre></div><p><strong>Effect:</strong> up to around +30% in the Postgres version, less in MySQL one.</p>
+<hr>
+<h3 id="rust-native-module-for-regex-matching">Rust native module for regex matching</h3>
+<p>Last year I wrote a little native module in Rust (which I didn&rsquo;t know at all before) to speed up matching of post contents with a large number of regexps for the feeds:</p>
+<!-- raw HTML omitted -->
+<p>The results were… unexpected. Swift &amp; Crystal didn&rsquo;t do well, but JS &amp; PHP did 🤔<!-- raw HTML omitted --><!-- raw HTML omitted --><!-- raw HTML omitted -->[image or embed]<!-- raw HTML omitted --><!-- raw HTML omitted -->— Kuba Suder 🇵🇱🇺🇦 (<!-- raw HTML omitted --><a href="http://mackuba.eu">@mackuba.eu</a><!-- raw HTML omitted -->) <!-- raw HTML omitted -->April 16, 2024 at 7:34 PM<!-- raw HTML omitted --><!-- raw HTML omitted --><!-- raw HTML omitted --><!-- raw HTML omitted --></p>
+<p>I haven&rsquo;t enabled it on production yet though, because there are some edge cases I need to get fixed, and I only used it for manual feed rebuilding so far. So as the next step, I enabled that Rust module in the firehose process. (I&rsquo;d love to eventually make that available as a gem you can easily add to your app.)</p>
+<p><strong>Effect:</strong> +15%.</p>
+<hr>
+<h3 id="asynchronous-transaction-commits">Asynchronous transaction commits</h3>
+<p>Next, I turned on two options: <code>synchronous_commit = off</code> in Postgres, and <code>innodb-flush-log-at-trx-commit = 0</code> in MySQL. These basically make it so that when you commit a transaction, you don&rsquo;t wait until it&rsquo;s synced to disk first, but the request returns just leaving the data in memory, and the data is synced to disk later (but like, up to a second later). So if the whole instance hard-reboots for some reason, you can lose maybe one second of data (but it wouldn&rsquo;t corrupt the database, since the transaction is either saved or not).</p>
+<p>This is possibly still dangerous if you&rsquo;re saving user&rsquo;s private data from a webapp, but in this case, I&rsquo;m streaming public data that I can scroll back through a bit if needed. So in the highly unlikely case that I lose a second of data somehow, I just replay a very slightly older cursor.</p>
+<p><strong>Effect:</strong> no noticeable improvement… probably because with the batched inserts, it was already doing just a few inserts per second, so there wasn&rsquo;t any more time to save here.</p>
+<hr>
+<h3 id="optimizing-json-handling-and-time-parsing">Optimizing JSON handling and Time parsing</h3>
+<p>I had a place in the processing function where it encodes a record parsed from CBOR into JSON, to be saved into a <code>data</code> column and for logging purposes, but for complicated reasons that <code>JSON.generate</code> was called twice with slightly different versions of record. So I refactored that to let it skip one encode.</p>
+<p>There was also some time spent parsing the record time and the event time into <code>Time</code> objects from an ISO8601 string using <code>Time.parse</code>; but I had a feeling that this could probably be speeded up using some native code, especially if it <em>only</em> accepts ISO8601 formats, and only in forms that actually appear in the data (since <code>Time.parse</code> handles many, many possible formats). With the help of Mr. GPT I made a little C module with a single function to replace <code>Time.parse</code>, and that indeed ended up being faster. (I&rsquo;ll also try to turn that into a micro-gem.)</p>
+<p><strong>Effect:</strong> +8% (this finally pushed it over the 4k level)</p>
+<hr>
+<h3 id="jetstream">Jetstream</h3>
+<p>Finally, just to check for now, I&rsquo;ve switched from the full CBOR firehose to <a href="https://github.com/bluesky-social/jetstream">Jetstream</a>, which is a kind of pre-processed stream that strips all the signatures and Merkle tree stuff and outputs a simplified JSON stream. I&rsquo;ve already added support for it to my firehose library <a href="https://github.com/mackuba/skyfall">Skyfall</a> in October, but I&rsquo;m not using it everywhere yet.</p>
+<p><strong>Effect:</strong> +30-40%, although the speed was suspiciously capped at almost precisely ~4989 evt/s on both servers… so I&rsquo;m guessing I might have hit some kind of rate limit of the Jetstream server. But I could also host it myself if needed.</p>
+<p>(Edit: yes, apparently 5k is the <a href="https://bsky.app/profile/edavis.dev/post/3lkobu26k222n">default rate limit</a> configured in Jetstream server settings.)</p>
+<hr>
+<h3 id="potential-ceiling">Potential ceiling</h3>
+<p>I also did a test with all processing completely skipped, so the app would just read the data packets from the websocket and discard them, not even decode the CBOR. This did around 6k evt/s with the full firehose (possibly more for Jetstream, but I couldn&rsquo;t test this) – so it looks like this is the max I can do without switching to something completely different. The <a href="https://github.com/faye/faye-websocket-ruby">library I&rsquo;m using</a> for websocket connection uses the very old <a href="https://github.com/eventmachine/eventmachine">eventmachine</a> library underneath, and I was told that the newer <a href="https://github.com/socketry/async-websocket">async-websocket</a> that uses the <a href="https://github.com/socketry/async">Async framework</a> could be faster, but in brief tests I wasn&rsquo;t able to see any improvement so far.</p>
+<p>Finally, just to see what the limit would be if I were to abandon Ruby (at least for that part), I ran a quick test in Rust, specifically using the example from the <a href="https://github.com/sugyan/atrium/tree/main/examples/firehose">Atrium library</a>. It did… 25k evt/s 😱 So yeah, there are still more options ;)</p>
+<p>That said, my <a href="https://www.netcup.com/en/server/root-server">current VPS</a> will max out the allowed traffic at a sustained 300 Mbps, which if I&rsquo;m counting correctly would be something like 7.8k evt/s from the full firehose, so above that level this would be the main problem.</p>
+
+		</div>
+	  </div>
+	
+	  <div class="h-entry">
+		
 			<h1><a href="https://journal.mackuba.eu/2025/03/06/macbook-air-vs-pro/">MacBook Air vs. Pro</a></h1>
 		
 
@@ -185,19 +293,6 @@
 </li>
 </ul>
 <p>I&rsquo;m really looking forward to when I can finally set up a production instance with Postgres and move everything there and drop the other branches - but I feel like this moment is getting close 😅</p>
-
-		</div>
-	  </div>
-	
-	  <div class="h-entry">
-		
-			<h1><a href="https://journal.mackuba.eu/2025/01/08/testing-github-integration/">Testing GitHub integration</a></h1>
-		
-
-		<a href="https://journal.mackuba.eu/2025/01/08/testing-github-integration/" class="u-url"><time class="dt-published" datetime="2025-01-08 23:27:40 &#43;0200">Jan 8, 2025</time></a>
-
-		<div class="e-content">
-			 <p>This is an example post to be saved to GitHub.</p>
 
 		</div>
 	  </div>
