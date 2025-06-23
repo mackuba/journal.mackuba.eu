@@ -24,6 +24,132 @@
 	
 	  <div class="h-entry">
 		
+			<h1><a href="https://journal.mackuba.eu/2025/06/23/a-couple-of-months-ago/">test speeding up firehose 2</a></h1>
+		
+
+		<a href="https://journal.mackuba.eu/2025/06/23/a-couple-of-months-ago/" class="u-url"><time class="dt-published" datetime="2025-06-24 00:53:44 &#43;0200">Jun 24, 2025</time></a>
+
+		<div class="e-content">
+			 <p>A couple of months ago, I <a href="/2025/03/18/speeding-up-the-firehose/">wrote about</a> the tests I&rsquo;ve done on how I can speed up my code processing the Bluesky firehose, using my Skyfall Ruby gem. The limits I&rsquo;ve reached then were around:</p>
+<ul>
+<li>4k events/s with full post processing that I normally do (saving all posts, matching posts to feeds etc.)</li>
+<li>5k events/s if using Jetstream - but I noted that it seemed suspiciously like that was a fixed rate limit (which others have confirmed in the comments)</li>
+<li>6k events/s just reading packets from the firehose, without processing</li>
+</ul>
+<p>Since then, I&rsquo;ve done two more things. The first one was that I&rsquo;ve set up a local Jetstream instance for testing, and configured it to have a much higher rate limit (the <a href="https://github.com/bluesky-social/jetstream/blob/d17bd81a945e697b66e682d6ac2364f70e537b27/cmd/jetstream/main.go#L85-L90">&ndash;max-sub-rate option</a>). I&rsquo;ve confirmed that indeed, with Jetstream, Skyfall can go much faster on the same server, up to about <strong>10-12k</strong> doing full processing.</p>
+<p>The second thing is that I started doing some profiling to find out where else I could save some processing time, and in the process, I managed to massively speed up the underlying <a href="https://github.com/faye/faye-websocket-ruby">faye-websocket</a> library 🙃</p>
+<h2 id="the-faye-speedup-fix">The Faye speedup fix</h2>
+<p>So, I was playing with <a href="https://ruby-prof.github.io">ruby-prof</a> to find where else I can shave off a few microseconds. I ran the scan on the version with my processing turned off, expecting the remaining work to be mostly in some boring internals of Faye or Ruby core libs, reading and writing bytes from the socket, adding them together and waiting.</p>
+<p>And I found something… quite interesting: a majority of time was spend in two places:</p>
+<ol>
+<li>some code deep inside Faye&rsquo;s helper library <a href="https://github.com/faye/websocket-driver-ruby/">websocket-driver</a>, which takes a filler string buffer and converts it to a byte array to be dispatched to a handler:</li>
+</ol>
+<pre tabindex="0"><code>                      4.519      4.519      0.000      0.000    130695/130695     WebSocket::Driver::Hybi#emit_message
+  13.83%  13.83%      4.519      4.519      0.000      0.000           130695     String#bytes
+</code></pre><ol start="2">
+<li>my code in Skyfall which takes a byte array received from Faye and converts it to a binary string:</li>
+</ol>
+<pre tabindex="0"><code>                      0.000      0.000      0.000      0.000         1/130696     WebSocket::HTTP::Response#body
+                     12.549     12.549      0.000      0.000    130695/130696     Skyfall::Firehose#handle_message
+  38.42%  38.42%     12.549     12.549      0.000      0.000           130696     Array#pack
+
+</code></pre><p>… wait a moment 🤔🤔💡</p>
+<p>Yes, for a binary websocket (which is used here), Faye prepares the received data in a binary <code>String</code>, but then sends it out as an <code>Array</code> of bytes:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-rb" data-lang="rb"><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">emit_message</span>
+  message  <span style="color:#f92672">=</span> @extensions<span style="color:#f92672">.</span>process_incoming_message(@message)
+  @message <span style="color:#f92672">=</span> <span style="color:#66d9ef">nil</span>
+
+  payload <span style="color:#f92672">=</span> message<span style="color:#f92672">.</span>data
+
+  <span style="color:#66d9ef">case</span> message<span style="color:#f92672">.</span>opcode
+    <span style="color:#66d9ef">when</span> <span style="color:#66d9ef">OPCODES</span><span style="color:#f92672">[</span><span style="color:#e6db74">:text</span><span style="color:#f92672">]</span> <span style="color:#66d9ef">then</span>
+      payload <span style="color:#f92672">=</span> <span style="color:#66d9ef">Driver</span><span style="color:#f92672">.</span>encode(payload, <span style="color:#66d9ef">Encoding</span><span style="color:#f92672">::</span><span style="color:#66d9ef">UTF_8</span>)
+      payload <span style="color:#f92672">=</span> <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">unless</span> payload<span style="color:#f92672">.</span>valid_encoding?
+    <span style="color:#66d9ef">when</span> <span style="color:#66d9ef">OPCODES</span><span style="color:#f92672">[</span><span style="color:#e6db74">:binary</span><span style="color:#f92672">]</span>
+      payload <span style="color:#f92672">=</span> payload<span style="color:#f92672">.</span>bytes<span style="color:#f92672">.</span>to_a    <span style="color:#75715e"># &lt;===</span>
+  <span style="color:#66d9ef">end</span>
+</code></pre></div><p>And since I want a binary string at the end, to pass it to the <a href="https://github.com/cabo/cbor-ruby">CBOR library</a> for decoding, I need to take that byte array and convert it back into a string just like the one we had before:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-rb" data-lang="rb"><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">handle_message</span>(msg)
+  data <span style="color:#f92672">=</span> msg<span style="color:#f92672">.</span>data<span style="color:#f92672">.</span>pack(<span style="color:#e6db74">&#39;C*&#39;</span>)
+  @handlers<span style="color:#f92672">[</span><span style="color:#e6db74">:raw_message</span><span style="color:#f92672">]&amp;.</span>call(data)
+</code></pre></div><p>So could we just… not do that? Yes, although not without some hacking, since the library didn&rsquo;t have an option to emit a string instead for binary websocket messages.</p>
+<p>I made some <a href="https://github.com/mackuba/skyfall/blob/0.5.1/lib/skyfall/faye_ext.rb">monkey-patches</a> to Faye &amp; websocket-driver first, and eventually a <a href="https://github.com/faye/websocket-driver-ruby/pull/95">PR</a> which I submitted to the author - adding a <code>:binary_data_format</code> option to <code>Faye::Websocket::Client</code> initializer, where you can ask to have the data returned as a string instead, defaulting to the original method of returning a byte array. The author actually said that he thinks it makes sense to change the default to a binary string (while adding an option to revert it), and version 0.12.0 <a href="https://github.com/faye/faye-websocket-ruby/blob/main/CHANGELOG.md">was released last month</a> with this changed behavior.</p>
+<h2 id="new-benchmarks">New benchmarks</h2>
+<p>I&rsquo;ve done the benchmarks again, and the results look very encouraging. This is for the CBOR firehose, with and without the fix, and also rechecked the <a href="https://github.com/socketry/async-websocket">async-websocket</a> library for comparison:</p>
+<table>
+<thead>
+<tr>
+<th>Library</th>
+<th>With processing</th>
+<th>With processing, + Rust lib</th>
+<th>Just reading</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Faye/EM Firehose (old)</td>
+<td>3,200-3,350</td>
+<td>3,300-3,450</td>
+<td>6,800-6,900</td>
+</tr>
+<tr>
+<td>Faye/EM Firehose (+ fix)</td>
+<td>5,300-5,600</td>
+<td>6,300-6,800</td>
+<td>33,000-34,500</td>
+</tr>
+<tr>
+<td>Async Firehose</td>
+<td>5,700-5,900</td>
+<td>5,700-5,900 (??)</td>
+<td>5,800-5,950 (??)</td>
+</tr>
+</tbody>
+</table>
+<p>And this is for Jetstream without a rate limit (the Faye fix does <em>not</em> affect/help Jetstream, because here the stream is text-based, not binary, so that problematic code path wasn&rsquo;t used here):</p>
+<table>
+<thead>
+<tr>
+<th>Library</th>
+<th>With processing</th>
+<th>With processing, + Rust lib</th>
+<th>Just reading</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Faye/EM Jetstream</td>
+<td>9,400-9,600</td>
+<td>11,000-12,000</td>
+<td>180,000-200,000</td>
+</tr>
+<tr>
+<td>Async Jetstream</td>
+<td>10,000-11,000</td>
+<td>12,000-15,000</td>
+<td>250,000-280,000</td>
+</tr>
+</tbody>
+</table>
+<p>As you can see:</p>
+<ul>
+<li>the fix gives me basically 50% speedup for free in the existing live code</li>
+<li>with the Rust module for regexp matching turned on, when a higher portion of the whole time is spent inside Faye + Skyfall, that speedup becomes more like 100%</li>
+<li>and when you skip all processing, and almost all of the time is spent inside Faye + Skyfall, that gets as much as 4-5x speedup (!)</li>
+<li>this gives me a possible ceiling of as much as 33-34k events/s if I manage to further optimize or parallelize the event processing parts (parsing CBOR/CAR, feed matching, building models, calling Postgres etc.)</li>
+<li>Jetstream mode, without the rate limit, can be around 2x faster than the Firehose version in practice</li>
+<li>with the data saving part optimized further, we can theoretically go into 6 digit numbers with Jetstream, but at this point it&rsquo;s kind of theoretical, because I would likely run into many other bottlenecks before I get there (disk speed, VPS bandwidth limits etc.)</li>
+<li>the Async library can be a bit faster than the EventMachine based one, but not dramatically so</li>
+</ul>
+<p>For unknown reason, I wasn&rsquo;t able to make the Async version go faster than 6k evt/s on the CBOR (binary) stream (while it was using much less than 100% CPU); not sure why, since it worked fine with Jetstream - maybe it was some issue on my side, but I don&rsquo;t really want to spend time digging into this. EM/Faye works fine (especially now), is very battle-tested (even if not being updated much anymore), works with older Rubies, and it would be a big API change for apparently not that much gain. So I think I&rsquo;m going to keep it as is and maybe reconsider for Skyfall 2.0 one day…</p>
+<p>Overall, I think all of this gives me more than enough space to not worry about this again until Bluesky becomes <em>much</em> bigger :)
+And it looks like I&rsquo;m not even going to need any parallel workers + Redis queue setup anytime soon.</p>
+
+		</div>
+	  </div>
+	
+	  <div class="h-entry">
+		
 			<h1><a href="https://journal.mackuba.eu/2025/03/18/speeding-up-the-firehose/">Speeding up the firehose</a></h1>
 		
 
