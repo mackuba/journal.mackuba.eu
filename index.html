@@ -24,6 +24,65 @@
 	
 	  <div class="h-entry">
 		
+			<h1><a href="https://journal.mackuba.eu/2025/07/02/skythread-updates/">Skythread updates</a></h1>
+		
+
+		<a href="https://journal.mackuba.eu/2025/07/02/skythread-updates/" class="u-url"><time class="dt-published" datetime="2025-07-02 21:04:53 &#43;0200">Jul 2, 2025</time></a>
+
+		<div class="e-content">
+			 <p>Since last autumn, I&rsquo;ve mostly been focused on database and server stuff (<a href="/2025/01/16/postgress-progress/">the Postgres migration</a>) and Ruby coding (e.g. the <a href="/2025/03/18/speeding-up-the-firehose/">firehose consumer optimizations</a>. I also have a couple of JavaScript projects, mainly <a href="https://github.com/mackuba/skythread">Skythread</a> – I&rsquo;ve been collecting a todo list of things to fix and add there, but I somehow couldn&rsquo;t get myself to switch contexts and take a look at that project again. I&rsquo;ve been procrastinating on this for months.</p>
+<p>And somehow, one day I decided to just sit down and open Skythread again and start coding – and apparently starting was the hardest part, who would&rsquo;ve guessed? 🙃</p>
+<p>So here are the &ldquo;fixes and improvements&rdquo; I managed to make in the last ~1.5 months:</p>
+<ul>
+<li>support for showing <a href="https://bsky.app/profile/did:plc:ragtjsm2j2vknwkz3zp4oxrd/post/3kmtptj5scu2f">outline hashtags</a> in post records</li>
+<li>support for video embeds, which for now are rendered like images, as a &ldquo;[Video]&rdquo; link</li>
+<li>clicking Tenor GIF embeds now loads and displays the GIF inline</li>
+<li>you can look up URLs from e.g. <a href="https://deer.social">deer.social</a>, <a href="https://zeppelin.social">zeppelin.social</a> and other forks of the Bluesky webapp just like with <a href="https://bsky.app">bsky.app</a>; same goes for the Label Scanner (thx <a href="https://bsky.app/profile/did:plc:36h6ttx2g23zqr4accilbvo7">@lucidillusions.in</a> and <a href="https://bsky.app/profile/did:plc:np4xrscdguofrrjq5rxazl3d">@roland.cros.by</a> for the suggestion)</li>
+<li>number of quotes of a post is shown in the post footer for all posts in the thread (which have any quotes), and not just for the root post</li>
+<li>added an indicator in the post footer if replies are limited in a thread due to a thread gate</li>
+<li>avatars are loaded lazily now, which should help with long threads with hundreds of posts, where CDN requests get rate-limited (it&rsquo;s still not ideal, I&rsquo;m planning to work on this a bit more)</li>
+<li>bookmark 📌 comments are listed at the end</li>
+<li>simplified the look of quotes on the quotes list a bit, so that more of them fit on the page at the same time</li>
+<li>posts in quotes list and hashtag feed views now show an icon with the number of replies in the footer</li>
+<li>fixed some annoying layout issues in some &ldquo;hidden replies&rdquo; threads (☣)</li>
+<li>if hidden replies don&rsquo;t load, there is now some info about why they didn&rsquo;t</li>
+<li>fixed being able to close the login dialog on pages that require login, like the timeline stats</li>
+<li>whitespace is trimmed from login/password fields in the login form</li>
+</ul>
+<p>Additionally, I&rsquo;ve been working on a new set of features somewhat separate from the main thread view, locked behind a login gate, meant to provide various statistics and utilities for your account. I haven&rsquo;t figured out the navigation part yet, so they&rsquo;re only reachable through direct links for now, but here&rsquo;s what I&rsquo;ve built there so far:</p>
+<hr>
+<ol>
+<li><a href="https://blue.mackuba.eu/skythread/?page=posting_stats">Posting statistics</a></li>
+</ol>
+<p class="center-image"><img src="uploads/2025/posting-stats.png" width="600" height="470" alt="A table displays Bluesky posting statistics, showing daily post metrics for various user handles over a 7-day period."></p>
+<p>This tool lets you scan and analyze various timelines in other to estimate who posts how much on average. The main use case is either to scan your home timeline, to find out if maybe some people are adding <em>a little bit</em> too much content to it, and you could consider unfollowing them, or at least moving them to a list (as a workaround for no &ldquo;turn off reposts&rdquo; option yet); or to look closer at one or more specific people that you are considering following, to see how much they would add to the timeline if you follow them.</p>
+<p>You can select the time range of how many days back to check, and there are four different modes:</p>
+<ul>
+<li>scan home timeline</li>
+<li>scan a list timeline, i.e. what you see when you pin a user list as a feed (list feeds don&rsquo;t include reposts)</li>
+<li>scan one or more specific users – look up the handles using autocomplete</li>
+<li>scan your own profile timeline (what <em>you</em> post/repost)</li>
+</ul>
+<p>Note: the &ldquo;archive&rdquo; of the home timeline that you can fetch from the Bluesky AppView is limited to some fixed number of recent posts, which I think includes all replies (even if they aren&rsquo;t displayed). Depending on how many people you follow, you will only be able to fetch some amount of days back before you reach the end, likely not all 60 that the slider allows. For me the limit is usually about 3 weeks, but I&rsquo;ve seen people say that they only get a few days worth of posts, or even less than one day (!).</p>
+<hr>
+<ol start="2">
+<li><a href="https://blue.mackuba.eu/skythread/?page=like_stats">Like statistics</a></li>
+</ol>
+<p class="center-image"><img src="uploads/2025/like-stats.png" width="600" height="423" alt="A table shows Like statistics for the past 30 days, listing accounts and the number of likes from and on a user's posts."></p>
+<p>This one is for scanning likes – yours on posts and comments of others, and those you&rsquo;ve received from them. Again, you select a time range to scan, and you get two tables, with the people you gave and got the most likes from recently. It can be a good way to find some people that you might have a lot in common with, but maybe aren&rsquo;t following yet.</p>
+<hr>
+<ol start="3">
+<li><a href="https://blue.mackuba.eu/skythread/?page=search">Timeline search</a></li>
+</ol>
+<p class="center-image"><img src="uploads/2025/timeline-archive-search.png" width="600" height="393" alt="Page which shows a search result for 'appview', displaying social media posts and replies that include that term."></p>
+<p>And the third tool is a very &ldquo;MVP&rdquo;-version thingie for searching things you might have seen on your home timeline, but can&rsquo;t find again. You need to first select a time range to fetch (right now it&rsquo;s not saved anywhere, so you lose it after closing the page), and then type some word or phrase in the search field to show matching posts from what was fetched.</p>
+<p>This is mostly just something that I built in &lt;2 hours because <a href="https://bsky.app/profile/j4ck.xyz/post/3lqulgychos2m">someone asked about it</a>, but it&rsquo;s also a first piece of something bigger that I want to make later this summer. Stay tuned 😏</p>
+
+		</div>
+	  </div>
+	
+	  <div class="h-entry">
+		
 			<h1><a href="https://journal.mackuba.eu/2025/06/24/firehose-go-brrr/">Firehose go brrr</a></h1>
 		
 
@@ -161,9 +220,9 @@ And it looks like I&rsquo;m not even going to need any parallel workers + Redis 
 <p>At the moment, the firehose flow ranges between ~300 and 700 events per second during the day (&ldquo;event&rdquo; being one &ldquo;action&rdquo; like created or deleted record of any kind), with the bottom around 7-9:00 UTC and the top around 17-22:00 UTC. But the highest bandwidth we&rsquo;ve seen so far was around <a href="https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:oio4hkxaop4ao4wz2pp3f4cr/bafkreickjkjffrmqcq7wdezei2tuytra2hjpnyiesfzc5rkxsobkzpufju@jpeg">1.8-2.0k events/s</a> in mid November, when a massive new wave of new users joined in the aftermath of the US elections, and we&rsquo;ve seen the traffic go up rapidly by a few hundred % within days before too, e.g. in early September when <a href="https://www.cnbc.com/2024/09/04/social-media-platform-bluesky-attracts-millions-in-brazil-after-judge-bans-musks-x-.html">the whole Brazil joined Bluesky</a>. The firehose protocol also includes a lot of extra data, needed for cryptographic verification and full replication of data repositories, but not used in a simple case like this – so the total data bandwidth to stream and process is an average ~20-30 Mbps right now (with the smaller traffic than before).</p>
 <p>My server was struggling back then in November, processing the 1.8k events per second, which is a big part of the reason why I started looking for a better suited database than SQLite, to be able to handle the next wave. I had a few improvements lined up, which I now started applying one by one (trying to do one at a time, so I can measure which one does what difference), each time pausing the reading for a day or so, and then catching up for several hours at full speed, so I can check what&rsquo;s the maximum speed it can do.</p>
 <p>I was also doing very simple profiling on the way, measuring which parts take how much time and where I can still save some extra microseconds:</p>
-<!-- raw HTML omitted -->
+<p class="center-image"><img src="uploads/2025/screenshot-2025-03-18-at-00.57.50.png" alt="" width="400"></p>
 <p>Overall, I managed to bring the number from around 2k evt/s to around 4k over a period of about a week (similarly in the MySQL and Postgres versions) – so not bad at all.</p>
-<!-- raw HTML omitted -->
+<p class="center-image"><img src="https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:oio4hkxaop4ao4wz2pp3f4cr/bafkreic76lrg6q2au7mfzltgyxgacte4k6nvj74y6xrmtxb2il4rjpn7dy" alt="" width="500"></p>
 <p>These are the changes I&rsquo;ve made:</p>
 <hr>
 <h3 id="partial-indexes">Partial indexes</h3>
@@ -228,8 +287,8 @@ And it looks like I&rsquo;m not even going to need any parallel workers + Redis 
 <hr>
 <h3 id="rust-native-module-for-regex-matching">Rust native module for regex matching</h3>
 <p>Last year I wrote a little native module in Rust (which I didn&rsquo;t know at all before) to speed up matching of post contents with a large number of regexps for the feeds:</p>
-<!-- raw HTML omitted -->
-<p>The results were… unexpected. Swift &amp; Crystal didn&rsquo;t do well, but JS &amp; PHP did 🤔<!-- raw HTML omitted --><!-- raw HTML omitted --><!-- raw HTML omitted -->[image or embed]<!-- raw HTML omitted --><!-- raw HTML omitted -->— Kuba Suder 🇵🇱🇺🇦 (<!-- raw HTML omitted --><a href="http://mackuba.eu">@mackuba.eu</a><!-- raw HTML omitted -->) <!-- raw HTML omitted -->April 16, 2024 at 7:34 PM<!-- raw HTML omitted --><!-- raw HTML omitted --><!-- raw HTML omitted --><!-- raw HTML omitted --></p>
+<blockquote class="bluesky-embed" data-bluesky-uri="at://did:plc:oio4hkxaop4ao4wz2pp3f4cr/app.bsky.feed.post/3kqb7cgeeah22" data-bluesky-cid="bafyreicmmgyryrgwlrwaqvznd3lchcq6zzcr3zehljvvq6fzee4jevkw6a" data-bluesky-embed-color-mode="system"><p lang="en">I played with a benchmark of some regexp matching code in several languages last week (I wanted to replace that part of Ruby code with something faster, maybe Crystal or Swift). ChatGPT helped me write some versions :)
+<p>The results were… unexpected. Swift &amp; Crystal didn&rsquo;t do well, but JS &amp; PHP did 🤔<br><br><a href="https://bsky.app/profile/did:plc:oio4hkxaop4ao4wz2pp3f4cr/post/3kqb7cgeeah22?ref_src=embed">[image or embed]</a></p>— Kuba Suder 🇵🇱🇺🇦 (<a href="https://bsky.app/profile/did:plc:oio4hkxaop4ao4wz2pp3f4cr?ref_src=embed"><a href="http://mackuba.eu">@mackuba.eu</a></a>) <a href="https://bsky.app/profile/did:plc:oio4hkxaop4ao4wz2pp3f4cr/post/3kqb7cgeeah22?ref_src=embed">April 16, 2024 at 7:34 PM</a></blockquote><script async src="https://embed.bsky.app/static/embed.js" charset="utf-8"></script></p>
 <p>I haven&rsquo;t enabled it on production yet though, because there are some edge cases I need to get fixed, and I only used it for manual feed rebuilding so far. So as the next step, I enabled that Rust module in the firehose process. (I&rsquo;d love to eventually make that available as a gem you can easily add to your app.)</p>
 <p><strong>Effect:</strong> +15%.</p>
 <hr>
