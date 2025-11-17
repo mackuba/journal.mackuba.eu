@@ -24,6 +24,72 @@
 	
 	  <div class="h-entry">
 		
+			<h1><a href="https://journal.mackuba.eu/2025/11/17/moving-to-leaflet/">Moving to Leaflet</a></h1>
+		
+
+		<a href="https://journal.mackuba.eu/2025/11/17/moving-to-leaflet/" class="u-url"><time class="dt-published" datetime="2025-11-17 23:24:32 &#43;0200">Nov 17, 2025</time></a>
+
+		<div class="e-content">
+			 <p>After about a year here, I&rsquo;ve decided to migrate this &ldquo;Journal&rdquo; miniblog from <a href="https://micro.blog">micro.blog</a> to <a href="https://leaflet.pub">Leaflet</a>, a new blogging service built on top of Bluesky&rsquo;s AT Protocol. I wrote about this in my first post on Leaflet <a href="https://lab.mackuba.eu/3m5tyjv3ssc2p">here</a>.</p>
+<p>I&rsquo;m leaving this site up for now, but I&rsquo;ve imported all existing posts from here to there, and eventually I&rsquo;ll add a redirect to the new domain <a href="https://lab.mackuba.eu">lab.mackuba.eu</a>. If you&rsquo;re following this blog via RSS, you&rsquo;ll need to update the feed URL (sorry :).</p>
+
+		</div>
+	  </div>
+	
+	  <div class="h-entry">
+		
+			<h1><a href="https://journal.mackuba.eu/2025/10/27/launching-lycan-a-search-tool/">Launching Lycan - a search tool for your likes</a></h1>
+		
+
+		<a href="https://journal.mackuba.eu/2025/10/27/launching-lycan-a-search-tool/" class="u-url"><time class="dt-published" datetime="2025-10-27 20:12:00 &#43;0200">Oct 27, 2025</time></a>
+
+		<div class="e-content">
+			 <p>You know that feeling when you&rsquo;re trying to find a post (skeet) that you&rsquo;ve seen some time ago, and you can&rsquo;t find it? It happens to me all the time. Let&rsquo;s say someone from the Bluesky dev team wrote some piece of technical detail, or some ATProto developer from the community posted about their project - I know more or less what I&rsquo;m looking for, but not enough to find it in the global search. But I know I probably gave it a like, because I like everything 😅</p>
+<p>It would be nice if Bluesky allowed you to search for text in your likes, like e.g. Mastodon does (the <code>in:library</code> modifier), but it doesn&rsquo;t support that yet. But &ldquo;<a href="https://underreacted.leaflet.pub/3m23gqakbqs2j">we can just do things</a>&rdquo;, right?</p>
+<p>I&rsquo;ve seen a project before that attempted to do this client-side, fetching all your likes and searching in them in memory, but this isn&rsquo;t quite realistic for someone like me who has around… 130 thousand likes from 2.5 years 🫣 So I figured this needs to be done on a server.</p>
+<p>So I&rsquo;ve built a service I named <a href="https://tangled.org/@mackuba.eu/lycan/">Lycan</a> 🐺 - it&rsquo;s kind of like a tiny specialized AppView, which only indexes some specific things from some specific people. To avoid having to keep a basically full-network AppView with a multi-TB database, it only indexes posts and likes on demand from people who request to use it. So the first time you want to use it, you need to ask it to run an import process, which happens on the server and can take anything between a few minutes and an hour, depending on how much data there is to download. After that, new likes are being indexed live from the firehose (and they&rsquo;re deleted if you either unlike a post, or if the post itself is deleted).</p>
+<p>At the moment, Lycan indexes four types of content:</p>
+<ul>
+<li>posts you&rsquo;ve liked</li>
+<li>posts you&rsquo;ve reposted</li>
+<li>posts you&rsquo;ve quoted</li>
+<li>your old-style bookmarks (using the 📌 emoji method)</li>
+</ul>
+<p>New bookmarks are private data, and I will need to use a different approach for that (OAuth).</p>
+<p>Lycan is written in Ruby (like almost all of my ATProto code 😎), using Sinatra and ActiveRecord, with Postgres as the database. I&rsquo;m running it at <code>lycan.feeds.blue</code>, but it&rsquo;s <a href="https://tangled.org/@mackuba.eu/lycan/">open source</a>, so you can also run it yourself.</p>
+<p>This is just a backend/API though, so how do you use it in practice, what about the UI? I built the UI as part of <a href="https://blue.mackuba.eu/skythread/">Skythread</a>, because it already had code for authentication, making requests and rendering posts and threads in JS, so there was no point duplicating that elsewhere. (Skythread is also <a href="https://tangled.org/@mackuba.eu/skythread">open source</a>, and at least right now you can open it directly from the downloaded repo, without even running any builds or dev servers, since it&rsquo;s just plain HTML &amp; JS with almost no dependencies.)</p>
+<p>You can find it in a somewhat new, separate section of Skythread that requires authentication and includes a few different personal tools:</p>
+<ul>
+<li><a href="https://blue.mackuba.eu/skythread/?page=posting_stats">Posting statistics</a>, which scan your home timeline or selected user&rsquo;s profiles and shows you statistics on who posts how much per day on average</li>
+<li><a href="https://blue.mackuba.eu/skythread/?page=like_stats">Like statistics</a>, for finding people who have liked your posts the most and whose posts you have liked the most recently</li>
+<li><a href="https://blue.mackuba.eu/skythread/?page=search">Timeline search</a>, which lets you fetch several days worth of posts from the &ldquo;Following&rdquo; feed and search for that thing you&rsquo;ve briefly seen two days ago</li>
+<li>and <a href="https://blue.mackuba.eu/skythread/?page=search&amp;mode=likes">Archive search</a>, which is the UI for Lycan</li>
+</ul>
+<p>You can find links to all of these in the popup menu accessed through the avatar button in the top-left corner. This is probably not the final version of this navigation, I need to rethink it all, but this will have to do for now.</p>
+<p><img src="https://eu.uploads.micro.blog/196792/2025/skythread-archive-menu.png" alt="A popup with a menu that shows options: Incognito mode, Show infohazards, Log out, and then links: Home, Posting stats, Like stats, Timeline search, Archive search; and an archive search section on the right with a search field and radio button options."></p>
+<p>Authentication is also required because I made Lycan require <a href="https://atproto.com/specs/xrpc#service-proxying">service auth (atproto-proxy)</a> of a specific user, so that you can only import and search <em>your own</em> likes - because I thought that even though it&rsquo;s technically public data, it would be kinda creepy if you could easily search for any keywords in <em>someone else&rsquo;s</em> likes 😬 I don&rsquo;t wanna build a Torment Nexus accidentally.</p>
+<p>I haven&rsquo;t added OAuth yet to Skythread - sorry, I know, I want to look into that in near future. Note, the access token isn&rsquo;t stored on the server - it&rsquo;s only used locally on the client, to make calls to your PDS for the threads and statistics, and in case of Lycan, the requests are also made to your PDS, which &ldquo;proxies&rdquo; them (same as with client&lt;-&gt;PDS&lt;-&gt;AppView normally) to the Lycan server, passing it a different kind of token, which only proves that it&rsquo;s you making the request, but can&rsquo;t be used to act on your behalf.</p>
+<p>So once you log in, press &ldquo;Start import&rdquo; and then come back in a bit to see if it&rsquo;s finished. Then use the search field and the category selectors to search in your archive. The search currently matches full words, with no modifications like plurals, with support for both phrases in quotes and exclusions with &ldquo;-&rdquo; (so e.g. <code>&quot;swift released&quot; -taylor</code> should work). I have a few more things on the todo list, e.g. searching in image alt text or searching in multiple categories at the same time.</p>
+<p><img src="https://eu.uploads.micro.blog/196792/2025/22e696875a.png" width="600" height="422" alt="Archive search with the word "relays" typed into the search field and some posts matching the query, with the word "relays" highlighted in yellow"></p>
+<p>From the implementation side, the search is rather &ldquo;bruteforce&rdquo; at the moment, i.e. there&rsquo;s no separate search server like Elastic or a Postgres full text index, it just does a plain old <code>LIKE</code> search (or more precisely, <code>~*</code> with a regexp for the word boundaries support) across all posts in your archive. I&rsquo;m hoping this will be enough for now, with a fairly low number of users and the dataset mostly fitting in memory (it&rsquo;s something on the order of ~50 MB per user on average).</p>
+<p>I&rsquo;m aware it&rsquo;s likely that this feature will be &ldquo;<a href="https://9to5mac.com/2024/06/12/here-are-the-apps-sherlocked-by-apple-during-wwdc-2024/">sherlocked</a>&rdquo; at some point by Bluesky when they implement this in their app (hopefully!) - but it&rsquo;s not like I&rsquo;m making any money on this 🙃</p>
+<p>BTW, speaking about Skythread, I&rsquo;ve been slowly approaching the point (or might be well past it, tbh) where &ldquo;rawdogging the DOM&rdquo; stops being a reasonable approach to building the app, so I&rsquo;ve grudgingly started looking into migrating to some kind of proper modern UI framework, while still keeping things as simple and not frameworky as humanly possible. Looks like Svelte is winning so far (I started going through the <a href="https://svelte.dev/tutorial">official tutorial</a>).</p>
+<p>Apart from that, some other things I have planned next:</p>
+<ul>
+<li>better navigation</li>
+<li>OAuth support with limited permissions</li>
+<li>mobile layout (yes, I remember 😛)</li>
+<li>more configuration, including things like overriding the default AppView</li>
+<li>quick reply panel inside the thread</li>
+<li>using <a href="https://constellation.microcosm.blue">Constellation</a> for &ldquo;Hidden replies&rdquo;, so I can load them more than a month back</li>
+</ul>
+<p>To not miss any updates, <a href="https://bsky.app/profile/mackuba.eu">please lycansubscribe</a> (I&rsquo;m really sorry…)</p>
+
+		</div>
+	  </div>
+	
+	  <div class="h-entry">
+		
 			<h1><a href="https://journal.mackuba.eu/2025/07/02/skythread-updates/">Skythread updates</a></h1>
 		
 
@@ -54,7 +120,7 @@
 <ol>
 <li><a href="https://blue.mackuba.eu/skythread/?page=posting_stats">Posting statistics</a></li>
 </ol>
-<p class="center-image"><img src="uploads/2025/posting-stats.png" width="600" height="470" alt="A table displays Bluesky posting statistics, showing daily post metrics for various user handles over a 7-day period."></p>
+<p class="center-image"><img src="https://eu.uploads.micro.blog/196792/2025/posting-stats.png" width="600" height="470" alt="A table displays Bluesky posting statistics, showing daily post metrics for various user handles over a 7-day period."></p>
 <p>This tool lets you scan and analyze various timelines in other to estimate who posts how much on average. The main use case is either to scan your home timeline, to find out if maybe some people are adding <em>a little bit</em> too much content to it, and you could consider unfollowing them, or at least moving them to a list (as a workaround for no &ldquo;turn off reposts&rdquo; option yet); or to look closer at one or more specific people that you are considering following, to see how much they would add to the timeline if you follow them.</p>
 <p>You can select the time range of how many days back to check, and there are four different modes:</p>
 <ul>
@@ -68,13 +134,13 @@
 <ol start="2">
 <li><a href="https://blue.mackuba.eu/skythread/?page=like_stats">Like statistics</a></li>
 </ol>
-<p class="center-image"><img src="uploads/2025/like-stats.png" width="600" height="423" alt="A table shows Like statistics for the past 30 days, listing accounts and the number of likes from and on a user's posts."></p>
+<p class="center-image"><img src="https://eu.uploads.micro.blog/196792/2025/like-stats.png" width="600" height="423" alt="A table shows Like statistics for the past 30 days, listing accounts and the number of likes from and on a user's posts."></p>
 <p>This one is for scanning likes – yours on posts and comments of others, and those you&rsquo;ve received from them. Again, you select a time range to scan, and you get two tables, with the people you gave and got the most likes from recently. It can be a good way to find some people that you might have a lot in common with, but maybe aren&rsquo;t following yet.</p>
 <hr>
 <ol start="3">
 <li><a href="https://blue.mackuba.eu/skythread/?page=search">Timeline search</a></li>
 </ol>
-<p class="center-image"><img src="uploads/2025/timeline-archive-search.png" width="600" height="393" alt="Page which shows a search result for 'appview', displaying social media posts and replies that include that term."></p>
+<p class="center-image"><img src="https://eu.uploads.micro.blog/196792/2025/timeline-archive-search.png" width="600" height="393" alt="Page which shows a search result for 'appview', displaying social media posts and replies that include that term."></p>
 <p>And the third tool is a very &ldquo;MVP&rdquo;-version thingie for searching things you might have seen on your home timeline, but can&rsquo;t find again. You need to first select a time range to fetch (right now it&rsquo;s not saved anywhere, so you lose it after closing the page), and then type some word or phrase in the search field to show matching posts from what was fetched.</p>
 <p>This is mostly just something that I built in &lt;2 hours because <a href="https://bsky.app/profile/j4ck.xyz/post/3lqulgychos2m">someone asked about it</a>, but it&rsquo;s also a first piece of something bigger that I want to make later this summer. Stay tuned 😏</p>
 
@@ -220,7 +286,7 @@ And it looks like I&rsquo;m not even going to need any parallel workers + Redis 
 <p>At the moment, the firehose flow ranges between ~300 and 700 events per second during the day (&ldquo;event&rdquo; being one &ldquo;action&rdquo; like created or deleted record of any kind), with the bottom around 7-9:00 UTC and the top around 17-22:00 UTC. But the highest bandwidth we&rsquo;ve seen so far was around <a href="https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:oio4hkxaop4ao4wz2pp3f4cr/bafkreickjkjffrmqcq7wdezei2tuytra2hjpnyiesfzc5rkxsobkzpufju@jpeg">1.8-2.0k events/s</a> in mid November, when a massive new wave of new users joined in the aftermath of the US elections, and we&rsquo;ve seen the traffic go up rapidly by a few hundred % within days before too, e.g. in early September when <a href="https://www.cnbc.com/2024/09/04/social-media-platform-bluesky-attracts-millions-in-brazil-after-judge-bans-musks-x-.html">the whole Brazil joined Bluesky</a>. The firehose protocol also includes a lot of extra data, needed for cryptographic verification and full replication of data repositories, but not used in a simple case like this – so the total data bandwidth to stream and process is an average ~20-30 Mbps right now (with the smaller traffic than before).</p>
 <p>My server was struggling back then in November, processing the 1.8k events per second, which is a big part of the reason why I started looking for a better suited database than SQLite, to be able to handle the next wave. I had a few improvements lined up, which I now started applying one by one (trying to do one at a time, so I can measure which one does what difference), each time pausing the reading for a day or so, and then catching up for several hours at full speed, so I can check what&rsquo;s the maximum speed it can do.</p>
 <p>I was also doing very simple profiling on the way, measuring which parts take how much time and where I can still save some extra microseconds:</p>
-<p class="center-image"><img src="uploads/2025/screenshot-2025-03-18-at-00.57.50.png" alt="" width="400"></p>
+<p class="center-image"><img src="https://eu.uploads.micro.blog/196792/2025/screenshot-2025-03-18-at-00.57.50.png" alt="" width="400"></p>
 <p>Overall, I managed to bring the number from around 2k evt/s to around 4k over a period of about a week (similarly in the MySQL and Postgres versions) – so not bad at all.</p>
 <p class="center-image"><img src="https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:oio4hkxaop4ao4wz2pp3f4cr/bafkreic76lrg6q2au7mfzltgyxgacte4k6nvj74y6xrmtxb2il4rjpn7dy" alt="" width="500"></p>
 <p>These are the changes I&rsquo;ve made:</p>
